@@ -99,7 +99,8 @@ function getOrCreateProfile(name) {
 function roomState(code) {
   const room = db.prepare('SELECT * FROM rooms WHERE code = ?').get(code);
   if (!room) return null;
-  const participants = db.prepare('SELECT name, avatar, points, shots, beers, wines, cocktails, drink_units FROM participants WHERE room_code = ? ORDER BY points DESC').all(code);
+  const participants = db.prepare('SELECT name, avatar, points, shots, beers, wines, cocktails, drink_units FROM participants WHERE room_code = ? ORDER BY points DESC').all(code)
+    .map(p => ({ ...p, gpd: Math.round((p.drink_units > 0 ? p.points / p.drink_units : 0) * 100) / 100 }));
 
   const totals = participants.reduce((t, p) => {
     t.giggle_score += p.points;
@@ -277,6 +278,20 @@ app.get('/api/profile/:name/tabs', (req, res) => {
     ORDER BY n.date DESC
     LIMIT 50
   `).all(name, name, name);
+
+  res.json(rows);
+});
+
+app.get('/api/profile/:name/open-tabs', (req, res) => {
+  const name = String(req.params.name || '').trim().slice(0, 24);
+  if (!name) return res.status(400).json({ error: 'Name required' });
+
+  const rows = db.prepare(`
+    SELECT code, owner, created_at
+    FROM rooms
+    WHERE status = 'active' AND code IN (SELECT room_code FROM participants WHERE name = ?)
+    ORDER BY created_at DESC
+  `).all(name);
 
   res.json(rows);
 });

@@ -150,6 +150,8 @@ button{ font-family:inherit; cursor:pointer; border:none; }
 .rank-row .av{ font-size:20px; }
 .rank-row .nm{ flex:1; font-weight:600; }
 .rank-row .pt{ font-family:'JetBrains Mono',monospace; color:var(--gold); font-weight:700;}
+.rank-row .pt-wrap{ display:flex; flex-direction:column; align-items:flex-end; }
+.rank-row .gpd-mini{ font-size:10px; opacity:0.6; margin-top:1px; }
 .rank-row.me{ border-color:var(--turquoise); }
 
 .tabs{ display:flex; gap:8px; margin-bottom:16px; }
@@ -221,7 +223,7 @@ button{ font-family:inherit; cursor:pointer; border:none; }
 
 <script>
 const API = '';
-const state = { view:'landing', profile:null, room:null, error:null, pollTimer:null, lbTab:'nights', lbData:null, giggleTarget:null, myTabs:null, tabDetail:null, tabDetailFrom:'home', pendingJoin:null };
+const state = { view:'landing', profile:null, room:null, error:null, pollTimer:null, lbTab:'nights', lbData:null, giggleTarget:null, myTabs:null, openTabs:null, tabDetail:null, tabDetailFrom:'home', pendingJoin:null };
 
 const ESC_MAP = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
 function esc(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, c => ESC_MAP[c]); }
@@ -371,7 +373,7 @@ function viewHome(){
     <div class="stack">
       <button class="btn primary" id="startBtn">Start a tab <span class="arrow">→</span></button>
       <button class="btn cyan" id="joinBtn">Join a tab <span class="arrow">→</span></button>
-      <button class="btn ghost" id="myTabsBtn">My past tabs <span class="arrow">→</span></button>
+      <button class="btn ghost" id="myTabsBtn">My tabs <span class="arrow">→</span></button>
       <button class="btn ghost" id="lbBtn">Leaderboard <span class="arrow">→</span></button>
     </div>
     ${state.error ? `<div class="error" style="margin-top:12px;">${state.error}</div>` : ''}
@@ -476,7 +478,10 @@ function renderRanking(r){
       <span class="pos mono">${i+1}</span>
       <span class="av">${p.avatar}</span>
       <span class="nm">${esc(p.name)}${isMe?' (you)':''}</span>
-      <span class="pt mono">${p.points.toFixed(1)} pts</span>
+      <span class="pt-wrap">
+        <span class="pt mono">${p.points.toFixed(1)} pts</span>
+        <span class="gpd-mini mono">${p.gpd.toFixed(2)} gpd</span>
+      </span>
     </div>`;
     const picker = open ? `
     <div class="grid2 giggle-picker">
@@ -601,8 +606,52 @@ function viewMyTabs(){
     <div class="brand" style="margin-bottom:18px;">
       <h1 class="title-block" style="font-size:26px;">My Tabs</h1>
     </div>
+    <div class="section-label">Open right now</div>
+    <div id="openTabsList">${renderOpenTabsList()}</div>
+    <div class="section-label">Past tabs</div>
     <div id="myTabsList">${renderMyTabsList()}</div>
   </div>`;
+}
+
+function renderOpenTabsList(){
+  const rows = state.openTabs;
+  if(!rows) return `<div class="empty">Loading…</div>`;
+  if(!rows.length) return `<div class="empty">No open tabs right now.</div>`;
+  const me = state.profile && state.profile.name;
+  return rows.map(r=>`
+    <div class="lb-row" data-rejoin-tab="${esc(r.code)}" style="cursor:pointer;">
+      <span class="rank mono">🟢</span>
+      <div class="info">
+        <div class="t1">Tab #${esc(r.code)}${r.owner===me?' · you\'re hosting':''}</div>
+        <div class="t2">hosted by ${esc(r.owner)}</div>
+      </div>
+      <div class="val" style="color:var(--turquoise); font-family:'Oswald',sans-serif; font-size:13px;">JOIN →</div>
+    </div>`).join('');
+}
+
+function bindRejoinHandlers(){
+  document.querySelectorAll('[data-rejoin-tab]').forEach(row=>{
+    row.onclick = async ()=>{
+      const code = row.dataset.rejoinTab;
+      try{
+        const r = await api('/api/rooms/'+code+'/join', {method:'POST', body:{name: state.profile.name}});
+        state.room = r;
+        saveRoom(r.code);
+        go('tab');
+        startPolling();
+      }catch(e){ toast(e.message); }
+    };
+  });
+}
+
+async function loadOpenTabs(){
+  try{
+    const rows = await api('/api/profile/'+encodeURIComponent(state.profile.name)+'/open-tabs');
+    state.openTabs = rows;
+    const el = document.getElementById('openTabsList');
+    if(el) el.innerHTML = renderOpenTabsList();
+    bindRejoinHandlers();
+  }catch(e){ /* ignore */ }
 }
 
 function renderMyTabsList(){
@@ -675,7 +724,10 @@ function viewTabDetail(){
         <span class="pos mono">${i+1}</span>
         <span class="av">${p.avatar}</span>
         <span class="nm">${esc(p.name)}</span>
-        <span class="pt mono">${p.points.toFixed(1)} pts</span>
+        <span class="pt-wrap">
+          <span class="pt mono">${p.points.toFixed(1)} pts</span>
+          <span class="gpd-mini mono">${p.gpd.toFixed(2)} gpd</span>
+        </span>
       </div>`).join('') : `<div class="empty">No one joined this tab.</div>`}</div>
   </div>`;
 }
@@ -739,7 +791,7 @@ function bindEvents(){
       }catch(e){ state.error = e.message; render(); }
     };
     document.getElementById('joinBtn').onclick = ()=> go('join');
-    document.getElementById('myTabsBtn').onclick = ()=>{ state.myTabs = null; go('myTabs'); loadMyTabs(); };
+    document.getElementById('myTabsBtn').onclick = ()=>{ state.myTabs = null; state.openTabs = null; go('myTabs'); loadMyTabs(); loadOpenTabs(); };
     document.getElementById('lbBtn').onclick = ()=>{ go('leaderboard'); loadLeaderboard(); };
     document.getElementById('logoutBtn').onclick = ()=>{
       localStorage.removeItem('gpd_name');
@@ -816,6 +868,7 @@ function bindEvents(){
   if(state.view === 'myTabs'){
     document.getElementById('backBtn').onclick = ()=> go('home');
     bindOpenTabHandlers();
+    bindRejoinHandlers();
   }
 
   if(state.view === 'tabDetail'){
