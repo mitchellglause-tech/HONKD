@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: honkd
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
